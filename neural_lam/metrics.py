@@ -18,7 +18,7 @@ def get_metric(metric_name):
     return DEFINED_METRICS[metric_name_lower]
 
 
-def mask_and_reduce_metric(metric_entry_vals, mask, average_grid, sum_vars):
+def mask_and_reduce_metric(metric_entry_vals, mask, grid_weights, average_grid, sum_vars):
     """
     Masks and (optionally) reduces entry-wise metric values
 
@@ -26,6 +26,7 @@ def mask_and_reduce_metric(metric_entry_vals, mask, average_grid, sum_vars):
         but broadcastable
     metric_entry_vals: (..., N, d_state), prediction
     mask: (N,), boolean mask describing which grid nodes to use in metric
+    grid_weights: (N,) or None, per-grid-node weights (e.g. cos-latitude)
     average_grid: boolean, if grid dimension -2 should be reduced (mean over N)
     sum_vars: boolean, if variable dimension -1 should be reduced (sum
         over d_state)
@@ -34,6 +35,10 @@ def mask_and_reduce_metric(metric_entry_vals, mask, average_grid, sum_vars):
     metric_val: One of (...,), (..., d_state), (..., N), (..., N, d_state),
     depending on reduction arguments.
     """
+    # Apply grid weights before masking
+    if grid_weights is not None:
+        metric_entry_vals = metric_entry_vals * grid_weights.unsqueeze(-1)
+
     # Only keep grid nodes in mask
     if mask is not None:
         metric_entry_vals = metric_entry_vals[
@@ -53,7 +58,7 @@ def mask_and_reduce_metric(metric_entry_vals, mask, average_grid, sum_vars):
     return metric_entry_vals
 
 
-def wmse(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
+def wmse(pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True):
     """
     Weighted Mean Squared Error
 
@@ -79,12 +84,13 @@ def wmse(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     return mask_and_reduce_metric(
         entry_mse_weighted,
         mask=mask,
+        grid_weights=grid_weights,
         average_grid=average_grid,
         sum_vars=sum_vars,
     )
 
 
-def mse(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
+def mse(pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True):
     """
     (Unweighted) Mean Squared Error
 
@@ -104,11 +110,11 @@ def mse(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     """
     # Replace pred_std with constant ones
     return wmse(
-        pred, target, torch.ones_like(pred_std), mask, average_grid, sum_vars
+        pred, target, torch.ones_like(pred_std), mask, grid_weights, average_grid, sum_vars
     )
 
 
-def wmae(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
+def wmae(pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True):
     """
     Weighted Mean Absolute Error
 
@@ -134,12 +140,13 @@ def wmae(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     return mask_and_reduce_metric(
         entry_mae_weighted,
         mask=mask,
+        grid_weights=grid_weights,
         average_grid=average_grid,
         sum_vars=sum_vars,
     )
 
 
-def mae(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
+def mae(pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True):
     """
     (Unweighted) Mean Absolute Error
 
@@ -159,11 +166,11 @@ def mae(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     """
     # Replace pred_std with constant ones
     return wmae(
-        pred, target, torch.ones_like(pred_std), mask, average_grid, sum_vars
+        pred, target, torch.ones_like(pred_std), mask, grid_weights, average_grid, sum_vars
     )
 
 
-def nll(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
+def nll(pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True):
     """
     Negative Log Likelihood loss, for isotropic Gaussian likelihood
 
@@ -186,12 +193,12 @@ def nll(pred, target, pred_std, mask=None, average_grid=True, sum_vars=True):
     entry_nll = -dist.log_prob(target)  # (..., N, d_state)
 
     return mask_and_reduce_metric(
-        entry_nll, mask=mask, average_grid=average_grid, sum_vars=sum_vars
+        entry_nll, mask=mask, grid_weights=grid_weights, average_grid=average_grid, sum_vars=sum_vars
     )
 
 
 def crps_gauss(
-    pred, target, pred_std, mask=None, average_grid=True, sum_vars=True
+    pred, target, pred_std, mask=None, grid_weights=None, average_grid=True, sum_vars=True
 ):
     """
     (Negative) Continuous Ranked Probability Score (CRPS)
@@ -223,7 +230,7 @@ def crps_gauss(
     )  # (..., N, d_state)
 
     return mask_and_reduce_metric(
-        entry_crps, mask=mask, average_grid=average_grid, sum_vars=sum_vars
+        entry_crps, mask=mask, grid_weights=grid_weights, average_grid=average_grid, sum_vars=sum_vars
     )
 
 

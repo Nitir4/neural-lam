@@ -4,6 +4,7 @@ import warnings
 from typing import Any, Dict, List
 
 # Third-party
+import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
@@ -136,6 +137,15 @@ class ARModel(pl.LightningModule):
             "interior_mask", 1.0 - self.boundary_mask, persistent=False
         )  # (num_grid_nodes, 1), 1 for non-border
 
+        # Compute and register grid weights for spatial weighting
+        grid_weights = self._compute_grid_weights()
+        if grid_weights is not None:
+            self.register_buffer(
+                "grid_weights", grid_weights, persistent=False
+            )
+        else:
+            self.grid_weights = None
+
         self.val_metrics: Dict[str, List] = {
             "mse": [],
         }
@@ -159,6 +169,27 @@ class ARModel(pl.LightningModule):
         self.time_step_int, self.time_step_unit = get_integer_time(
             self._datastore.step_length
         )
+
+    def _compute_grid_weights(self):
+        """
+        Compute grid node weights based on cos(latitude) normalization.
+        Returns (num_grid_nodes,) tensor or None if lat/lon cannot be
+        determined.
+        """
+        try:
+            xy = self._datastore.get_xy(category="state", stacked=True)
+            projection = self._datastore.coords_projection
+            latlon_crs = ccrs.PlateCarree()
+            lonlat = latlon_crs.transform_points(
+                projection, xy[:, 0], xy[:, 1]
+            )  # (N, 3) — lon, lat, z
+            lat_rad = np.deg2rad(lonlat[:, 1])  # (N,)
+            cos_lat = np.cos(lat_rad)  # (N,)
+            # Normalize: w_i = cos(lat_i) / mean(cos(lat))
+            weights = cos_lat / np.mean(cos_lat)  # (N,)
+            return torch.tensor(weights, dtype=torch.float32)
+        except Exception:
+            return None
 
     def _create_dataarray_from_tensor(
         self,
@@ -303,7 +334,8 @@ class ARModel(pl.LightningModule):
         # Compute loss
         batch_loss = torch.mean(
             self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
+                prediction, target, pred_std, mask=self.interior_mask_bool,
+                grid_weights=self.grid_weights,
             )
         )  # mean over unrolled times and batch
 
@@ -339,7 +371,8 @@ class ARModel(pl.LightningModule):
 
         time_step_loss = torch.mean(
             self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
+                prediction, target, pred_std, mask=self.interior_mask_bool,
+                grid_weights=self.grid_weights,
             ),
             dim=0,
         )  # (time_steps-1)
@@ -366,6 +399,7 @@ class ARModel(pl.LightningModule):
             target,
             pred_std,
             mask=self.interior_mask_bool,
+            grid_weights=self.grid_weights,
             sum_vars=False,
         )  # (B, pred_steps, d_f)
         self.val_metrics["mse"].append(entry_mses)
@@ -393,7 +427,8 @@ class ARModel(pl.LightningModule):
 
         time_step_loss = torch.mean(
             self.loss(
-                prediction, target, pred_std, mask=self.interior_mask_bool
+                prediction, target, pred_std, mask=self.interior_mask_bool,
+                grid_weights=self.grid_weights,
             ),
             dim=0,
         )  # (time_steps-1,)
@@ -424,6 +459,7 @@ class ARModel(pl.LightningModule):
                 target,
                 pred_std,
                 mask=self.interior_mask_bool,
+                grid_weights=self.grid_weights,
                 sum_vars=False,
             )  # (B, pred_steps, d_f)
             self.test_metrics[metric_name].append(batch_metric_vals)

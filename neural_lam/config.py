@@ -82,6 +82,25 @@ class OutputClamping:
 
 
 @dataclasses.dataclass
+class UniformGridWeighting:
+    """
+    Configuration for uniform grid weighting (all grid nodes weighted equally).
+    """
+
+    pass
+
+
+@dataclasses.dataclass
+class CosLatitudeGridWeighting:
+    """
+    Configuration for cos(latitude)-based grid weighting, where each grid
+    node is weighted proportionally to the cosine of its latitude.
+    """
+
+    pass
+
+
+@dataclasses.dataclass
 class TrainingConfig:
     """
     Configuration related to training neural-lam
@@ -102,6 +121,10 @@ class TrainingConfig:
     output_clamping: OutputClamping = dataclasses.field(
         default_factory=OutputClamping
     )
+
+    grid_weighting: Union[
+        UniformGridWeighting, CosLatitudeGridWeighting
+    ] = dataclasses.field(default_factory=UniformGridWeighting)
 
 
 @dataclasses.dataclass
